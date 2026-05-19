@@ -1,0 +1,133 @@
+# 1. 필요한 라이브러리 설치 (코랩에 설치되어 있지 않다면 실행)
+!pip install -q gradio
+
+import os
+import json
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import gradio as gr
+
+# 결과 저장 폴더 생성
+MOCK_RESULTS_DIR = "./results"
+os.makedirs(MOCK_RESULTS_DIR, exist_ok=True)
+
+# -------------------------------------------------------------
+# 에이전트 백엔드 기능 (기존과 동일)
+# -------------------------------------------------------------
+class DataAgentBackend:
+    @staticmethod
+    def load_and_prepare_psc_dataset():
+        np.random.seed(42)
+        cs_content = np.array([0, 2, 4, 5, 5.5, 5.6, 6, 7, 8, 10, 12, 15, 20])
+        f4_factor = 1.43 - 0.015 * (cs_content - 5.5)**2 + np.random.normal(0, 0.05, len(cs_content))
+        df = pd.DataFrame({'Index': range(1, 14), 'Device Structure': ['Inverted'] * 13, 'Cs': cs_content, 'FA': 100 - cs_content, 'F_4': np.clip(f4_factor, 0, 2.0)})
+        df.to_json(f"{MOCK_RESULTS_DIR}/Case_PSC_internal.json", orient='records', indent=4)
+        return "기본 데이터셋 세팅 완료"
+
+class CompositionAgentBackend:
+    @staticmethod
+    def run_ml_fitting():
+        plot_path = f"{MOCK_RESULTS_DIR}/Case_composition_fit.png"
+        X_mock = np.linspace(0, 20, 100)
+        y_mock = 1.43 - 0.015 * (X_mock - 5.5)**2
+        
+        plt.figure(figsize=(6, 4))
+        plt.scatter([0, 2, 5, 5.5, 6, 10, 15, 20], [0.8, 1.1, 1.4, 1.43, 1.41, 1.2, 0.7, 0.3], color='red', label='Experimental Data')
+        plt.plot(X_mock, y_mock, color='blue', label='GP Model Prediction')
+        plt.fill_between(X_mock, y_mock - 0.1, y_mock + 0.1, color='blue', alpha=0.15, label='Confidence Interval')
+        plt.xlabel('Cs Content (%)')
+        plt.ylabel('Stability (F_4 Factor)')
+        plt.title('Perovskite Stability Optimization (GP Fit)')
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(plot_path)
+        plt.close()
+        return plot_path, "### [Composition Agent 분석 리포트]\n- **모델:** Gaussian Process Regression\n- **인사이트:** Cesium(Cs) 조성이 **5.5% 부근**일 때 최고 안정성(F4 ~1.43)을 기록합니다."
+
+class InterfaceAgentBackend:
+    @staticmethod
+    def run_ml_fitting():
+        plot_path = f"{MOCK_RESULTS_DIR}/Case_interface_fit.png"
+        y_true = np.random.uniform(0.5, 3.5, 20)
+        y_pred = y_true + np.random.normal(0, 0.2, 20)
+        
+        plt.figure(figsize=(5, 5))
+        plt.scatter(y_true, y_pred, color='purple', alpha=0.7)
+        plt.plot([0, 4], [0, 4], 'k--', alpha=0.5)
+        plt.xlabel('Actual Dipole Moment')
+        plt.ylabel('Predicted Dipole Moment')
+        plt.title('SAM Dipole Moment: Actual vs Predicted')
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(plot_path)
+        plt.close()
+        return plot_path, "### [Interface Agent 학습 리포트]\n- **모델:** XGBoost Regressor\n- **인사이트:** 분자의 쌍극자 모멘트(Dipole Moment) 예측 모델 검증이 완료되었습니다. (Test R² ≈ 0.94)"
+
+# -------------------------------------------------------------
+# Gradio 연동용 인터페이스 함수
+# -------------------------------------------------------------
+def respond_to_user(user_query, history):
+    """유저의 질문에 따라 텍스트 답변과 그래프 이미지를 분기하여 리턴"""
+    query = user_query.lower()
+    
+    # 기본값 설정
+    text_output = ""
+    image_output = None
+    
+    # 1. 조성 에이전트 호출 조건
+    if "조성" in query or "composition" in query or "배합" in query:
+        img_path, report = CompositionAgentBackend.run_ml_fitting()
+        text_output = report
+        image_output = img_path
+        
+    # 2. 인터페이스 에이전트 호출 조건
+    elif "sam" in query or "dipole" in query or "분자" in query or "인터페이스" in query:
+        img_path, report = InterfaceAgentBackend.run_ml_fitting()
+        text_output = report
+        image_output = img_path
+        
+    # 3. 그 외 기본 인사 및 아키텍처 제안
+    else:
+        DataAgentBackend.load_and_prepare_psc_dataset()
+        text_output = (
+            "### 🌟 Perovskite Multi-Agent AI Framework에 오신 것을 환영합니다!\n\n"
+            "고온(100°C) 환경 스트레스를 견디는 고안정성 태양전지를 위해 **역구조(Inverted p-i-n)** 설계를 추천합니다.\n\n"
+            "**아래 예시 문장을 입력 창에 넣고 테스트해 보세요:**\n"
+            "1. `Cs 조성을 바탕으로 머신러닝 학습 돌려줘.` (가우시안 프로세스 그래프 출력)\n"
+            "2. `SAM 분자 데이터셋의 XGBoost 결과 보여줘.` (산점도 그래프 출력)"
+        )
+        image_output = None
+        
+    return text_output, image_output
+
+# -------------------------------------------------------------
+# Gradio UI 레이아웃 설계
+# -------------------------------------------------------------
+# 웹 화면의 구조를 정의합니다.
+with gr.Blocks(theme=gr.themes.Soft()) as demo:
+    gr.Markdown("# ☀️ Perovskite Multi-Agent AI Design Framework")
+    gr.Markdown("사용자 가이드북 시나리오 기반의 오프라인 에이전트 연동 UI 플랫폼입니다.")
+    
+    with gr.Row():
+        # 왼쪽 레이아웃: 입력 및 텍스트 리포트 창
+        with gr.Column(scale=1):
+            input_box = gr.Textbox(
+                label="Central Agent에게 명령 입력", 
+                placeholder="예: Cs 조성을 바탕으로 머신러닝 학습 돌려줘.",
+                lines=2
+            )
+            submit_btn = gr.Button("에이전트 호출", variant="primary")
+            text_response = gr.Markdown(value="왼쪽 입력창에 질문을 던지면 Central Agent가 이곳에 보고서를 작성합니다.")
+            
+        # 오른쪽 레이아웃: 에이전트가 생성한 시각화 그래프 창
+        with gr.Column(scale=1):
+            image_response = gr.Image(label="에이전트 분석 시각화 그래프 (Plots)", type="filepath")
+            
+    # 버튼 및 텍스트 엔터 입력 시 이벤트 연결
+    submit_btn.click(fn=respond_to_user, inputs=[input_box], outputs=[text_response, image_response])
+    input_box.submit(fn=respond_to_user, inputs=[input_box], outputs=[text_response, image_response])
+
+# 코랩에서 실행 및 임시 웹 링크 활성화
+demo.launch(debug=True)
